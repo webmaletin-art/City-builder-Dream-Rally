@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.CityBuilder" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#1B2A36</item>
+        <item name="android:navigationBarColor">#1B2A36</item>
+        <item name="android:windowBackground">#1B2A36</item>
+    </style>
+    <color name="ic_bg">#2E7D4F</color>
+</resources>

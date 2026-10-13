@@ -73,7 +73,7 @@ class RoadGraph(val edges: Collection<RoadEdge>) {
         segments = segs.sortedBy { it.id }
 
         val segAt = HashMap<Vtx, MutableList<String>>()
-        for (s in segments) { segAt.getOrPut(s.start) { ArrayList() }.add(s.id); if (!s.isLoop) segAt.getOrPut(s.end) { ArrayList() }.add(s.id) else segAt.getOrPut(s.end) { ArrayList() } }
+        for (s in segments) for (v in s.nodes) segAt.getOrPut(v) { ArrayList() }.add(s.id)
         nodes = adj.mapValues { (v, es) ->
             val deg = es.size
             RoadNode(v, deg, when { deg == 1 -> NodeKind.ENDPOINT; deg == 2 -> NodeKind.THROUGH; else -> NodeKind.INTERSECTION }, segAt[v]?.distinct() ?: emptyList())

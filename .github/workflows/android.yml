@@ -1,0 +1,110 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main, master, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # solo para publicar el APK de depuración como pre-release "debug-latest"
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      HAS_RELEASE_KEY: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Pruebas unitarias (núcleo + cámara)
+        run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest
+
+      - name: Compilar APK de depuración
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Preparar firma de distribución (si hay secretos)
+        if: env.HAS_RELEASE_KEY == 'true'
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "RELEASE_STORE_PASSWORD=${{ secrets.RELEASE_STORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_ALIAS=${{ secrets.RELEASE_KEY_ALIAS }}" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+
+      - name: Compilar APK de distribución
+        run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Generar ciudad de ejemplo (ZIP DreamCity)
+        run: |
+          mkdir -p dist
+          ./gradlew --no-daemon :core:run --args="$PWD/dist/demo-city.dreamcity.zip"
+
+      - name: Comprobar archivos y firma
+        run: |
+          set -e
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/CityBuilder-debug.apk
+          test -s dist/CityBuilder-debug.apk
+          test -s dist/demo-city.dreamcity.zip
+          if [ "$HAS_RELEASE_KEY" = "true" ]; then
+            cp app/build/outputs/apk/release/app-release.apk dist/CityBuilder-release.apk
+            test -s dist/CityBuilder-release.apk
+            "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs dist/CityBuilder-release.apk | head -3
+            SIGNED="firmado con la clave de distribución (verificado con apksigner)"
+          else
+            SIGNED="NO generado: faltan los secretos RELEASE_KEYSTORE_* (ver README)"
+          fi
+          "$ANDROID_HOME"/build-tools/*/apksigner verify dist/CityBuilder-debug.apk
+          {
+            echo "## Resultado"
+            echo "| Archivo | Tamaño |"; echo "|---|---|"
+            for f in dist/*; do echo "| $(basename $f) | $(du -h $f | cut -f1) |"; done
+            echo ""; echo "- APK de depuración: firmado con la clave de depuración fija del repositorio (se actualiza sobre versiones anteriores)."
+            echo "- APK de distribución: $SIGNED"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CityBuilder-apk
+          path: dist/*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-city-package
+          path: dist/demo-city.dreamcity.zip
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: |
+            core/build/reports/tests
+            app/build/reports/tests
+          if-no-files-found: ignore
+
+      - name: Publicar pre-release "debug-latest" (enlace de descarga directo)
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete debug-latest --cleanup-tag --yes || true
+          gh release create debug-latest dist/CityBuilder-debug.apk dist/demo-city.dreamcity.zip \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "Build de depuración (${GITHUB_REF_NAME})" \
+            --notes "APK de depuración y ciudad de ejemplo generados por el commit $GITHUB_SHA. Rama: $GITHUB_REF_NAME."

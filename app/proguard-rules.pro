@@ -1,0 +1,6 @@
+-keepclassmembers class **$$serializer { *; }
+-keepclasseswithmembers class dev.dreamrally.citybuilder.** { kotlinx.serialization.KSerializer serializer(...); }
+-keep,includedescriptorclasses class dev.dreamrally.citybuilder.**$$serializer { *; }
+-keepattributes *Annotation*, InnerClasses
+-dontwarn java.lang.management.**
+-dontwarn org.slf4j.**
