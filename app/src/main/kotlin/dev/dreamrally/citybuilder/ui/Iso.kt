@@ -59,9 +59,13 @@ private fun poly(a: Offset, b: Offset, c: Offset, d: Offset? = null): Path = Pat
 }
 
 /** Dibuja un edificio del catálogo como volumen isométrico. (x,y,w,d): huella en celdas ya girada. */
-fun DrawScope.drawBuilding(cam: Camera, spec: BuildingSpec, x: Int, y: Int, fw: Int, fd: Int, alpha: Float = 1f, tint: Color? = null, baseH: Float = 0f) {
+fun DrawScope.drawBuilding(cam: Camera, spec: BuildingSpec, x: Int, y: Int, fw: Int, fd: Int, alpha: Float = 1f, tint: Color? = null, baseH: Float = 0f, hScale: Float = 1f, front: Boolean = false) {
     val m = spec.model
-    val hC = (m.heightM / Grid.CELL_M).toFloat()
+    val hC = (m.heightM / Grid.CELL_M).toFloat() * hScale
+    if (m.shape != "park" && m.shape != "plaza" && hScale > 0.05f) {
+        val o = (hC * 0.12f).coerceIn(0.05f, 0.5f)
+        drawPath(poly(cam.project(x + o, y + o, baseH), cam.project(x + fw + o, y + o, baseH), cam.project(x + fw + o, y + fd + o, baseH), cam.project(x + o, y + fd + o, baseH)), Color.Black.copy(alpha = 0.16f * alpha))
+    }
     val x0 = x + 0.1f; val y0 = y + 0.1f; val x1 = x + fw - 0.1f; val y1 = y + fd - 0.1f
     fun col(rgb: Int, s: Float = 1f) = (tint ?: colorOf(rgb, s)).copy(alpha = alpha)
     fun P(px: Float, py: Float, h: Float) = cam.project(px, py, baseH + h)
@@ -128,6 +132,17 @@ fun DrawScope.drawBuilding(cam: Camera, spec: BuildingSpec, x: Int, y: Int, fw: 
         }
         else -> prism(x0, y0, x1, y1, 0f, hC, m.wallRgb, m.roofRgb)
     }
+}
+
+/** Marca del frente del edificio (lado que debe mirar a la calle). rot: 0 sur, 1 este, 2 norte, 3 oeste. */
+fun DrawScope.drawFrontMarker(cam: Camera, x: Int, y: Int, fw: Int, fd: Int, rot: Int, color: Color) {
+    val (a, b) = when (rot and 3) {
+        0 -> Offset(x.toFloat(), y + fd.toFloat()) to Offset(x + fw.toFloat(), y + fd.toFloat())
+        1 -> Offset(x + fw.toFloat(), y.toFloat()) to Offset(x + fw.toFloat(), y + fd.toFloat())
+        2 -> Offset(x.toFloat(), y.toFloat()) to Offset(x + fw.toFloat(), y.toFloat())
+        else -> Offset(x.toFloat(), y.toFloat()) to Offset(x.toFloat(), y + fd.toFloat())
+    }
+    drawLine(color, cam.project(a.x, a.y), cam.project(b.x, b.y), strokeWidth = cam.zoom * 0.09f, cap = StrokeCap.Round)
 }
 
 /** Contorno de una huella sobre el suelo. */

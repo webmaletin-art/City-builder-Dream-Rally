@@ -129,3 +129,19 @@ class CityTest {
         assertEquals(Category.entries.toSet(), DefaultCatalog.catalog.all.map { it.category }.toSet(), "todas las categorías tienen edificios")
     }
 }
+
+class AutoRotateTest {
+    @Test fun buildingTurnsItsFrontTowardTheRoad() {
+        val c = City(CityConfig("t", "T"), DefaultCatalog.catalog).also { it.ensureLoaded(it.config.unlocked) }
+        val spec = DefaultCatalog.catalog["res_house_small"]!!
+        c.drawRoad(listOf(Vtx(0, 5), Vtx(8, 5)), RoadType.STREET)       // calle al sur de la casa en (2,4)
+        assertEquals(0, c.bestRotation(spec, 2, 4, 2), "frente al sur")
+        c.drawRoad(listOf(Vtx(10, 0), Vtx(10, 8)), RoadType.STREET)     // calle al este de la casa en (9,2)
+        assertEquals(1, c.bestRotation(spec, 9, 2, 0), "frente al este")
+        assertEquals(2, c.bestRotation(spec, 3, 5, 0), "frente al norte (la calle queda arriba)")
+        assertEquals(0, c.bestRotation(spec, -12, -12, 0), "sin calles: se conserva el giro")
+        assertTrue(c.nodesWithDegreeAtLeast(3, -20, -20, 20, 20).isEmpty())
+        c.drawRoad(listOf(Vtx(5, 0), Vtx(5, 8)), RoadType.STREET)
+        assertEquals(listOf(Vtx(5, 5)), c.nodesWithDegreeAtLeast(3, -20, -20, 20, 20))
+    }
+}

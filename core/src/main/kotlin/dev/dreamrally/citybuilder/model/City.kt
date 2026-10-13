@@ -121,6 +121,10 @@ class City(
     fun edgesIn(x0: Int, y0: Int, x1: Int, y1: Int): List<RoadEdge> =
         edgesByKey.values.filter { it.a.x in (x0 - 1)..(x1 + 1) && it.a.y in (y0 - 1)..(y1 + 1) }
 
+    /** Vértices viales con al menos [n] aristas dentro del rectángulo (intersecciones a dibujar). */
+    fun nodesWithDegreeAtLeast(n: Int, x0: Int, y0: Int, x1: Int, y1: Int): List<Vtx> =
+        adjacency.entries.filter { it.value.size >= n && it.key.x in x0..x1 && it.key.y in y0..y1 }.map { it.key }
+
     fun footprint(b: PlacedBuilding): List<Pair<Int, Int>> {
         val spec = catalog[b.catalogId] ?: return listOf(b.x to b.y)
         return footprintCells(b.x, b.y, spec.footprintW(b.rot), spec.footprintD(b.rot))
@@ -140,6 +144,24 @@ class City(
         val warns = ArrayList<String>()
         if (spec.placement.needsRoad && !touchesRoad(x, y, w, d)) warns += "Sin conexión a una carretera"
         return Outcome(true, warnings = warns)
+    }
+
+    /**
+     * Giro automático "de frente a la calle" (comportamiento observable en constructores urbanos): el frente del
+     * modelo es su lado +Z local; con giro r mira a sur/este/norte/oeste. Devuelve el giro que deja el frente
+     * pegado a una carretera (prefiere [current]); si ninguno lo logra, devuelve [current].
+     */
+    fun bestRotation(spec: BuildingSpec, x: Int, y: Int, current: Int): Int {
+        ensureLoaded(sectorsTouching(x, y, spec.widthCells, spec.depthCells))
+        val order = listOf(current and 3, (current + 1) and 3, (current + 2) and 3, (current + 3) and 3)
+        return order.firstOrNull { frontTouchesRoad(x, y, spec.footprintW(it), spec.footprintD(it), it) && canPlace(spec, x, y, it).ok } ?: (current and 3)
+    }
+
+    fun frontTouchesRoad(x: Int, y: Int, w: Int, d: Int, rot: Int): Boolean = when (rot and 3) {
+        0 -> (x until x + w).any { edge(Vtx(it, y + d), Vtx(it + 1, y + d)) != null }       // sur
+        1 -> (y until y + d).any { edge(Vtx(x + w, it), Vtx(x + w, it + 1)) != null }       // este
+        2 -> (x until x + w).any { edge(Vtx(it, y), Vtx(it + 1, y)) != null }               // norte
+        else -> (y until y + d).any { edge(Vtx(x, it), Vtx(x, it + 1)) != null }            // oeste
     }
 
     fun placeBuilding(catalogId: String, x: Int, y: Int, rot: Int = 0): Outcome {

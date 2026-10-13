@@ -19,12 +19,20 @@ import dev.dreamrally.citybuilder.model.*
 @Composable
 fun EditorCanvas(vm: AppModel, modifier: Modifier = Modifier) {
     val slop = LocalViewConfiguration.current.touchSlop
+    LaunchedEffect(vm.animTick) { // fotograma a fotograma solo mientras haya animaciones activas
+        while (vm.popAnim.isNotEmpty()) { androidx.compose.runtime.withFrameNanos { }; val now = System.currentTimeMillis(); vm.popAnim.entries.removeAll { now - it.value > 450 }; vm.camTick++ }
+    }
     Canvas(
         modifier.fillMaxSize().pointerInput(Unit) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
-                var multi = false; var moved = false; var last = down.position; var drawing = false
+                var multi = false; var moved = false; var last = down.position; var drawing = false; var startMove = false
                 val erasePath = ArrayList<Vtx>()
+                if (vm.tool == Tool.SELECT && !vm.moving) { // arrastrar el edificio seleccionado = moverlo (como en el juego de referencia)
+                    val sel = vm.selectedBuilding?.let { vm.city?.building(it) }
+                    val (dx, dy) = vm.cellAt(down.position.x, down.position.y)
+                    if (sel != null && vm.city?.footprint(sel)?.contains(dx to dy) == true) { vm.moving = true; vm.rot = sel.rot; vm.autoRotate = false; startMove = true }
+                }
                 if (vm.tool == Tool.BUILD || (vm.tool == Tool.SELECT && vm.moving)) vm.updateGhost(vm.cellAt(down.position.x, down.position.y))
                 if (vm.tool == Tool.ROAD && !vm.roundaboutMode) { drawing = true; vm.roadPreview = listOf(vm.vertexAt(down.position.x, down.position.y)) }
                 if (vm.tool == Tool.ERASE) erasePath += vm.vertexAt(down.position.x, down.position.y)
@@ -60,7 +68,7 @@ fun EditorCanvas(vm: AppModel, modifier: Modifier = Modifier) {
                         drawing -> { if (moved) vm.commitRoad() else vm.roadPreview = emptyList() }
                         vm.tool == Tool.ERASE -> { if (moved) vm.eraseRoad(erasePath) else vm.eraseAt(down.position.x, down.position.y) }
                         !moved -> when (vm.tool) {
-                            Tool.SELECT -> if (!vm.moving) vm.tapSelect(down.position.x, down.position.y)
+                            Tool.SELECT -> if (startMove) { vm.moving = false; vm.ghost = null; vm.tapSelect(down.position.x, down.position.y) } else if (!vm.moving) vm.tapSelect(down.position.x, down.position.y)
                             Tool.ROAD -> if (vm.roundaboutMode) vm.placeRoundabout(down.position.x, down.position.y)
                             Tool.EXPAND -> vm.unlockAt(down.position.x, down.position.y)
                             else -> {}
@@ -128,13 +136,14 @@ private fun DrawScope.drawScene(vm: AppModel, cam: Camera) {
     val edges = city.edgesIn(x0, y0, x1, y1)
     fun vp(v: Vtx) = cam.project(v.x.toFloat(), v.y.toFloat(), if (relief) hAt(v.x, v.y) else 0f)
     val wScale = cam.zoom * 0.36f / 8f
-    for (e in edges) drawLine(Color(0xFF2A2D32), vp(e.a), vp(e.b), strokeWidth = (e.type.width.toFloat() * wScale * 1.25f).coerceAtLeast(3f), cap = StrokeCap.Round)
+    for (e in edges) drawLine(Color(0xFFC9C5BA), vp(e.a), vp(e.b), strokeWidth = (e.type.width.toFloat() * wScale * 1.35f).coerceAtLeast(4f), cap = StrokeCap.Round) // acera/cordón
     for (e in edges) drawLine(colorOf(e.type.rgb), vp(e.a), vp(e.b), strokeWidth = (e.type.width.toFloat() * wScale).coerceAtLeast(2f), cap = StrokeCap.Round)
     if (cam.zoom > 30f) for (e in edges) {
         if (e.type == RoadType.DIRT) continue
         drawLine(if (e.type == RoadType.AVENUE) Color(0xFFE8C53A) else Color.White.copy(alpha = 0.8f), vp(e.a), vp(e.b), strokeWidth = (cam.zoom * 0.02f).coerceAtLeast(1f))
         if (e.oneWay != 0) { val m = Offset((vp(e.a).x + vp(e.b).x) / 2, (vp(e.a).y + vp(e.b).y) / 2); drawCircle(Color(0xFF4FC3F7), cam.zoom * 0.05f, m) }
     }
+    for (n in city.nodesWithDegreeAtLeast(3, x0, y0, x1, y1)) drawCircle(Color(0xFF55585C), cam.zoom * 0.2f, vp(n))
     val selE = vm.selectedEdgeObj()
     if (selE != null) for (e in city.chainFrom(selE)) drawLine(Color(0xFFFFEB3B), vp(e.a), vp(e.b), strokeWidth = (e.type.width.toFloat() * wScale * 0.5f).coerceAtLeast(3f), cap = StrokeCap.Round)
     for (rb in cfg.roundabouts) if (rb.cx in x0..x1 && rb.cy in y0..y1) drawCircle(Color(0xFF5E9E3F), cam.zoom * 0.75f, cam.project(rb.cx.toFloat(), rb.cy.toFloat(), if (relief) hAt(rb.cx, rb.cy) else 0f))
@@ -153,7 +162,9 @@ private fun DrawScope.drawScene(vm: AppModel, cam: Camera) {
         val fw = spec.footprintW(b.rot); val fd = spec.footprintD(b.rot)
         val base = if (relief) hAt(b.x, b.y) else 0f
         val isMoving = vm.moving && vm.selectedBuilding == b.id
-        drawBuilding(cam, spec, b.x, b.y, fw, fd, alpha = if (isMoving) 0.35f else 1f, baseH = base)
+        val t0 = vm.popAnim[b.id]
+        val hs = if (t0 == null) 1f else { val t = ((System.currentTimeMillis() - t0) / 380f).coerceIn(0f, 1f); val c1 = 1.70158f; val u = t - 1f; (1f + (c1 + 1f) * u * u * u + c1 * u * u).coerceAtLeast(0.05f) }
+        drawBuilding(cam, spec, b.x, b.y, fw, fd, alpha = if (isMoving) 0.35f else 1f, baseH = base, hScale = hs)
         if (b.id == vm.selectedBuilding) drawFootprint(cam, b.x, b.y, fw, fd, Color(0x33FFEB3B), Color(0xFFFFEB3B), base)
     }
 
@@ -165,8 +176,9 @@ private fun DrawScope.drawScene(vm: AppModel, cam: Camera) {
         if (spec != null) {
             val fw = spec.footprintW(vm.rot); val fd = spec.footprintD(vm.rot)
             val ok = vm.ghostValid
-            drawFootprint(cam, g.first, g.second, fw, fd, (if (ok) Color(0x554CAF50) else Color(0x55F44336)), if (ok) Color(0xFF4CAF50) else Color(0xFFF44336))
+            drawFootprint(cam, g.first, g.second, fw, fd, (if (ok) Color(0x554CAF50) else Color(0x55F44336)), if (ok) Color.White else Color(0xFFF44336))
             drawBuilding(cam, spec, g.first, g.second, fw, fd, alpha = 0.7f, tint = null)
+            if (spec.placement.needsRoad) drawFrontMarker(cam, g.first, g.second, fw, fd, vm.rot, Color.White)
         }
     }
 }

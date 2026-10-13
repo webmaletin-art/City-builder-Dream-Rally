@@ -95,6 +95,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var replacing by mutableStateOf(false)
     var grid by mutableStateOf(true)
     var info by mutableStateOf("")
+    var autoRotate by mutableStateOf(true)          // girar solo para que el frente mire a la calle
+    val popAnim = HashMap<String, Long>()            // id edificio -> inicio de la animación (ms)
+    var animTick by mutableIntStateOf(0)
+    fun startPop(id: String?) { if (id != null) { popAnim[id] = System.currentTimeMillis(); animTick++ } }
 
     fun resetEditor() { tool = Tool.HAND; ghost = null; roadPreview = emptyList(); selectedBuilding = null; selectedEdge = null; moving = false; replacing = false; toast = null }
     fun recenter() { cam.cx = 0f; cam.cy = 0f; camTick++ }
@@ -123,6 +127,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         val id = if (moving) c.building(selectedBuilding ?: "")?.catalogId else selectedCatalogId
         val spec = id?.let { catalog[it] } ?: run { ghostValid = false; ghostMessage = "Elegí un edificio del catálogo"; return }
         val ignore = if (moving) selectedBuilding else null
+        if (autoRotate) rot = c.bestRotation(spec, cell.first, cell.second, rot)
         val chk = c.canPlace(spec, cell.first, cell.second, rot, ignore)
         ghostValid = chk.ok; ghostMessage = if (chk.ok) chk.warnings.firstOrNull() else chk.message
         info = "Celda ${cell.first}, ${cell.second}  •  altura ${"%.1f".format(Heights.at(c.config.relief, c.config.reliefSeed, cell.first, cell.second))} m"
@@ -133,11 +138,12 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         if (moving) {
             val id = selectedBuilding ?: return
             val r = c.moveBuilding(id, g.first, g.second, rot)
-            toast = if (r.ok) "Movido" else r.message; if (r.ok) { moving = false; ghost = null }
+            toast = if (r.ok) "Movido" else r.message; if (r.ok) { startPop(id); moving = false; ghost = null }
         } else {
             val id = selectedCatalogId ?: run { toast = "Elegí un edificio del catálogo"; return }
             val r = c.placeBuilding(id, g.first, g.second, rot)
             toast = if (r.ok) (r.warnings.firstOrNull() ?: "Colocado") else r.message
+            if (r.ok) startPop(r.id)
         }
         bump(); updateGhost(g)
     }

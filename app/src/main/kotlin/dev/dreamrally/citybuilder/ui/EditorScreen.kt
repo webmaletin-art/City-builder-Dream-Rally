@@ -70,6 +70,23 @@ fun EditorScreen(vm: AppModel) {
             Text(if (vm.info.isNotEmpty()) "${vm.info}  |  $stats" else stats, fontSize = 11.sp, modifier = Modifier.background(Color(0x9916222C)).padding(horizontal = 8.dp, vertical = 2.dp))
         }
 
+        // ---- burbuja de confirmación junto al edificio (✓ ⟳ ✗), como en el juego de referencia ----
+        val g = vm.ghost
+        if (g != null && (vm.tool == Tool.BUILD || vm.moving)) {
+            vm.camTick; vm.revision
+            val spec = (if (vm.moving) city.building(vm.selectedBuilding ?: "")?.catalogId else vm.selectedCatalogId)?.let { city.catalog[it] }
+            if (spec != null) {
+                val c = vm.cam.project(g.first + spec.footprintW(vm.rot) / 2f, g.second + spec.footprintD(vm.rot) / 2f, (spec.model.heightM / Grid.CELL_M).toFloat() + 0.8f)
+                Row(Modifier.offset { androidx.compose.ui.unit.IntOffset((c.x - 76.dp.toPx()).toInt(), (c.y - 52.dp.toPx()).toInt()) }.background(Color(0xEE1F2F3B), RoundedCornerShape(24.dp)).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FilledIconButton(onClick = { vm.confirmGhost() }, enabled = vm.ghostValid && (vm.moving || vm.selectedCatalogId != null), modifier = Modifier.size(44.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFF43A047))) { Text("✓", fontSize = 20.sp) }
+                    FilledIconButton(onClick = { vm.autoRotate = false; vm.rot = (vm.rot + 1) and 3; vm.updateGhost(g) }, modifier = Modifier.size(44.dp)) { Text("⟳", fontSize = 20.sp) }
+                    FilledIconButton(onClick = { vm.ghost = null; vm.moving = false }, modifier = Modifier.size(44.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFFE53935))) { Text("✕", fontSize = 18.sp) }
+                }
+            }
+        }
+
         // ---- mensaje ----
         vm.toast?.let { Surface(Modifier.align(Alignment.Center), shape = RoundedCornerShape(20.dp), color = Color(0xE6000000)) { Text(it, Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) } }
 
@@ -133,7 +150,8 @@ private fun CatalogPanel(vm: AppModel) {
     Column {
         if (!replacing) Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(vm.ghostMessage ?: "Tocá o arrastrá en el mapa para ubicar", Modifier.weight(1f), fontSize = 12.sp, color = if (vm.ghost != null && !vm.ghostValid) Color(0xFFEF9A9A) else Color.White)
-            TextButton(onClick = { vm.rot = (vm.rot + 1) and 3; vm.ghost?.let { vm.updateGhost(it) } }) { Text("⟳ Girar") }
+            FilterChip(vm.autoRotate, { vm.autoRotate = !vm.autoRotate; vm.ghost?.let { vm.updateGhost(it) } }, { Text("Auto-giro", fontSize = 11.sp) })
+            TextButton(onClick = { vm.autoRotate = false; vm.rot = (vm.rot + 1) and 3; vm.ghost?.let { vm.updateGhost(it) } }) { Text("⟳ Girar") }
             Button(onClick = { vm.confirmGhost() }, enabled = vm.ghost != null && vm.ghostValid && vm.selectedCatalogId != null, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("✓ Colocar") }
         } else Text("Elegí el edificio de reemplazo", Modifier.padding(8.dp), fontSize = 13.sp)
         Row(Modifier.fillMaxWidth().horizontalScrollCompat(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -197,14 +215,15 @@ private fun SelectionPanel(vm: AppModel) {
             val spec = c.catalog[b.catalogId]
             Text("${spec?.name ?: b.catalogId}  •  ${spec?.category?.label}", fontWeight = FontWeight.Bold)
             Text("id ${b.id} • celda ${b.x},${b.y} • giro ${b.rot * 90}° • ${spec?.widthCells}×${spec?.depthCells} celdas • ${spec?.model?.heightM} m • sector ${b.sector.name}", fontSize = 11.sp)
-            if (vm.moving) Text("Tocá o arrastrá el destino y pulsá Mover aquí.", fontSize = 12.sp)
+            if (vm.moving) Text("Arrastrá a la nueva posición y confirmá con ✓ (mover es gratis).", fontSize = 12.sp)
+            else Text("Tip: arrastrá el edificio seleccionado para moverlo.", fontSize = 11.sp)
             Row(Modifier.horizontalScrollCompat(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (vm.moving) { OutlinedButton(onClick = { vm.rot = (vm.rot + 1) and 3; vm.ghost?.let { vm.updateGhost(it) } }) { Text("⟳") }
                     Button(onClick = { vm.confirmGhost() }, enabled = vm.ghost != null && vm.ghostValid) { Text("Mover aquí") }
                     TextButton(onClick = { vm.moving = false; vm.ghost = null }) { Text("Cancelar") } }
                 else {
                     OutlinedButton(onClick = { val r = c.rotateBuilding(b.id); vm.toast = if (r.ok) "Girado" else r.message; vm.bump() }) { Text("⟳ Girar") }
-                    OutlinedButton(onClick = { vm.moving = true; vm.rot = b.rot; vm.updateGhost(b.x to b.y) }) { Text("Mover") }
+                    OutlinedButton(onClick = { vm.moving = true; vm.autoRotate = false; vm.rot = b.rot; vm.updateGhost(b.x to b.y) }) { Text("Mover") }
                     OutlinedButton(onClick = { vm.replacing = true; spec?.let { vm.category = it.category } }) { Text("Reemplazar") }
                     OutlinedButton(onClick = { c.removeBuilding(b.id); vm.selectedBuilding = null; vm.bump() }) { Text("Eliminar") }
                 }
