@@ -80,7 +80,10 @@ class CityTest {
     @Test fun roadBuildingAdjacency() {
         val c = newCity()
         c.drawRoad(listOf(Vtx(0, 0), Vtx(5, 0)), RoadType.STREET)
-        val ok = c.placeBuilding("res_house_small", 1, 0)
+        val wrongSide = c.placeBuilding("res_house_small", 1, 0, 0)            // la calle queda al norte, el frente mira al sur
+        assertTrue(wrongSide.ok); assertTrue(wrongSide.warnings.single().contains("frente"))
+        c.removeBuilding(wrongSide.id!!)
+        val ok = c.placeBuilding("res_house_small", 1, 0, 2)                   // frente al norte, hacia la calle
         assertTrue(ok.ok); assertTrue(ok.warnings.isEmpty())
         val far = c.placeBuilding("res_house_small", 1, 6)
         assertTrue(far.ok); assertTrue(far.warnings.single().contains("carretera"))

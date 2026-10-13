@@ -63,3 +63,24 @@ Si tenés la APK **oficial** de tu propia cuenta de Google Play, podés ejecutar
 
 ## 6. Implementación propia
 Editor isométrico (Compose Canvas) + núcleo Kotlin (`:core`) con modelo, red vial, guardado por sectores y exportador `DreamCity Package`. Ver `README.md` y `docs/export/dream-city-package-spec.md`.
+
+## 7. REA: ejecución real (sobre APK propia) y estado de la APK de referencia
+
+**Ejecutado de verdad** (2026-10-13, Linux, Node 22.22, JDK 21):
+```
+git clone --depth 1 https://github.com/morluto/rea.git          # rea-agents 6.4.0
+curl -L -o jadx.jar https://github.com/1013503897/jadx-headless-mcp/releases/download/v0.7.1/jadx-headless-mcp-0.7.1-all.jar
+sha256sum jadx.jar   # 6e5eacf5…ff75  == SHA-256 auditado por REA (src/android/JadxRelease.ts)
+npm ci --ignore-scripts && npm run build
+REA_JADX_MCP_JAR=$PWD/jadx.jar node scripts/rea.mjs inspect-android-package own.apk
+```
+Resultado (evidence `ev_a8cf30b3…`, ver `docs/research/evidence/rea-run-own-apk.txt`): **nuestra** APK de depuración (sha256 `c19be0c4…39fd`): 6114 clases, 145 recursos, paquete `dev.dreamrally.citybuilder`, actividad `MainActivity`. Es la verificación de que la cadena REA+JADX funciona en este entorno.
+
+**APK de SimCity BuildIt: no analizada.** El único archivo recibido es un *mod* pirata de un tercero (androforever). No lo descomprimí ni lo decompilé: no voy a descompilar una copia no autorizada del juego de EA ni a extraer sus recursos, aunque el uso sea privado. Por tanto **no hay hechos comprobados** sobre su cuadrícula, trazado de calles, manzanas ni dimensiones; todo eso quedó como diseño propio (ver `docs/design/building-engine-spec.md`).
+
+**Cómo seguir si querés datos del juego real, sin ese archivo:**
+1. *Observación*: grabá video o capturas de tu propia partida (calles en curva, cruces, colocar/mover edificios, ampliar terreno). Puedo analizar imágenes para medir proporciones de lotes, anchos de calle relativos y comportamiento visual, y ajustar parámetros (`LOT`, radios de curva, anchos) con evidencia.
+2. *Tus medidas*: si conocés dimensiones/reglas, las vuelco en el catálogo y `Grid`.
+3. Análisis de código del juego: no lo voy a hacer sobre el juego de EA.
+
+Limitaciones de REA para este fin (según su documentación): decompila código y manifiesto; el código nativo (.so) queda fuera de JADX; no reconstruye formatos de recursos 3D.

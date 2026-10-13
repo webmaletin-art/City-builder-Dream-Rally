@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlin.math.abs
 
 @Serializable
-data class PlacedBuilding(val id: String, val catalogId: String, val x: Int, val y: Int, val rot: Int = 0) {
+data class PlacedBuilding(val id: String, val catalogId: String, val x: Int, val y: Int, val rot: Int = 0, val level: Int = 0, val variant: Int = 0) {
     val sector: SectorId get() = Grid.sectorKey(x, y)
 }
 
@@ -118,8 +118,13 @@ class City(
         return out.toList()
     }
 
-    fun edgesIn(x0: Int, y0: Int, x1: Int, y1: Int): List<RoadEdge> =
-        edgesByKey.values.filter { it.a.x in (x0 - 1)..(x1 + 1) && it.a.y in (y0 - 1)..(y1 + 1) }
+    fun edgesIn(x0: Int, y0: Int, x1: Int, y1: Int): List<RoadEdge> {
+        val out = ArrayList<RoadEdge>()
+        val area = (x1 - x0 + 3).toLong() * (y1 - y0 + 3)
+        if (area > edgesByKey.size * 4L) return edgesByKey.values.filter { it.a.x in (x0 - 1)..(x1 + 1) && it.a.y in (y0 - 1)..(y1 + 1) }
+        for (vx in x0 - 1..x1 + 1) for (vy in y0 - 1..y1 + 1) adjacency[Vtx(vx, vy)]?.forEach { k -> edgesByKey[k]?.takeIf { it.a.x == vx && it.a.y == vy }?.let { out += it } }
+        return out
+    }
 
     /** Vértices viales con al menos [n] aristas dentro del rectángulo (intersecciones a dibujar). */
     fun nodesWithDegreeAtLeast(n: Int, x0: Int, y0: Int, x1: Int, y1: Int): List<Vtx> =
@@ -142,7 +147,13 @@ class City(
         if (edgeCrossesFootprint(x, y, w, d)) return Outcome(false, "Hay una carretera en el solar")
         for (rb in config.roundabouts) if (x < rb.cx + 2 && x + w > rb.cx - 2 && y < rb.cy + 2 && y + d > rb.cy - 2) return Outcome(false, "Es parte de una rotonda")
         val warns = ArrayList<String>()
-        if (spec.placement.needsRoad && !touchesRoad(x, y, w, d)) warns += "Sin conexión a una carretera"
+        if (rot !in spec.placement.allowedRotations) return Outcome(false, "Orientación no permitida")
+        val noRoad = spec.placement.needsRoad && !touchesRoad(x, y, w, d)
+        val noFront = spec.placement.frontOnRoad && !noRoad && !frontTouchesRoad(x, y, w, d, rot)
+        if (spec.placement.strict && noRoad) return Outcome(false, "Necesita conexión a una carretera")
+        if (spec.placement.strict && noFront) return Outcome(false, "El frente debe dar a una calle")
+        if (noRoad) warns += "Sin conexión a una carretera"
+        else if (noFront) warns += "El frente no mira a la calle"
         return Outcome(true, warnings = warns)
     }
 
@@ -201,6 +212,46 @@ class City(
         val chk = canPlace(spec, b.x, b.y, b.rot, ignoreId = id)
         if (!chk.ok) return chk
         apply(listOf(Op.RemoveBuilding(b), Op.AddBuilding(b.copy(catalogId = newCatalogId)))); return Outcome(true, warnings = chk.warnings, id = id)
+    }
+
+    /** Sube un nivel de evolución si el catálogo define el aspecto siguiente. La huella no cambia. */
+    fun upgradeBuilding(id: String): Outcome {
+        val b = buildingsById[id] ?: return Outcome(false, "No existe")
+        val spec = catalog[b.catalogId] ?: return Outcome(false, "Edificio desconocido")
+        if (!spec.hasLevel(b.level + 1)) return Outcome(false, "Ya está al máximo nivel")
+        apply(listOf(Op.RemoveBuilding(b), Op.AddBuilding(b.copy(level = b.level + 1)))); return Outcome(true, "Nivel ${b.level + 2}", id = id)
+    }
+
+    fun setVariant(id: String, variant: Int): Outcome {
+        val b = buildingsById[id] ?: return Outcome(false, "No existe")
+        if (b.variant == variant) return Outcome(false, "Sin cambios")
+        apply(listOf(Op.RemoveBuilding(b), Op.AddBuilding(b.copy(variant = variant)))); return Outcome(true, id = id)
+    }
+
+    data class Placement(val x: Int, val y: Int, val rot: Int)
+
+    /**
+     * Ajuste a la calle: busca (±3 celdas, 4 giros) la posición válida más cercana al punto tocado cuyo frente
+     * quede pegado a una carretera. Null si no hay ninguna (se coloca donde se toque).
+     */
+    fun alignToRoad(spec: BuildingSpec, tx: Int, ty: Int, curRot: Int): Placement? {
+        ensureLoaded(sectorsTouching(tx, ty, 4, 4))
+        var best: Placement? = null; var bestScore = Double.MAX_VALUE
+        for (dx in -3..3) for (dy in -3..3) for (r in 0..3) {
+            if (r !in spec.placement.allowedRotations) continue
+            val x = tx + dx; val y = ty + dy
+            if (!frontTouchesRoad(x, y, spec.footprintW(r), spec.footprintD(r), r)) continue
+            val score = dx * dx + dy * dy + if (r != (curRot and 3)) 0.5 else 0.0
+            if (score < bestScore && canPlace(spec, x, y, r).ok) { bestScore = score; best = Placement(x, y, r) }
+        }
+        return best
+    }
+
+    /** Manzanas y parcelas derivadas de la red vial en el rectángulo de celdas dado. */
+    fun blocks(rect: IntArray): BlockMap {
+        ensureLoaded(((Grid.sectorOf(rect[0]) - 1)..(Grid.sectorOf(rect[2]) + 1)).flatMap { sx -> ((Grid.sectorOf(rect[1]) - 1)..(Grid.sectorOf(rect[3]) + 1)).map { sy -> SectorId(sx, sy) } })
+        return BlockBuilder.build(rect, { a, b -> edgesByKey.containsKey(RoadEdge.key(a, b)) }, { x, y -> isUnlockedCell(x, y) },
+            { x, y -> config.roundabouts.any { x in it.cx - 2..it.cx + 1 && y in it.cy - 2..it.cy + 1 } }, { x, y -> occupancy[cell(x, y)] })
     }
 
     // ---------- carreteras ----------

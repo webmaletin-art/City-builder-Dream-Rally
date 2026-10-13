@@ -1,4 +1,6 @@
-# DreamCity Package — especificación v1.0.0 (schemaVersion 1)
+# DreamCity Package — especificación v1.1.0 (schemaVersion 1)
+
+> v1.1.0 (aditiva, compatible con lectores 1.0): `blocks.json` (manzanas y parcelas), `level`/`variant` en edificios y modelos por aspecto (`<id>__l<N>_v<M>.glb`), `curve` (geometría redondeada) en segmentos viales.
 
 Contrato entre **City Builder** (exportador) y el futuro importador de **Dream Rally (Godot 4)**.
 Ejemplo real y verificado: [`examples/demo-city.dreamcity.zip`](../../examples/demo-city.dreamcity.zip) (9 sectores, 116 edificios, 36 segmentos, 83 archivos).
@@ -21,6 +23,7 @@ manifest.json
 city.json
 roads.json
 buildings.json
+blocks.json                         manzanas y parcelas derivadas de la red vial
 materials/materials.json
 terrain/sec_<x>_<y>.json            alturas por sector
 geometry/models/<catalogId>.glb     un modelo por tipo de edificio (instanciado N veces)
@@ -83,9 +86,14 @@ Biomas: `temperate, desert, snow, tropical, autumn`. Relieves: `flat, gentle, hi
 Nodos extra en el GLB de carreteras: `n_<x>_<y>` (parches de unión) e `island_<rbId>` (isla de rotonda).
 Las velocidades y clases son valores por tipo de vía definidos por la app (no datos medidos); el importador puede reemplazarlos.
 
+## 6b. blocks.json
+`blocks[]`: `id (blk_x_y), cellCount, open, boundsCells[minx,miny,maxx,maxy], parcels[]`. `parcels[]`: `id (p_x_y), block, cell, size[w,d] (celdas), sector, position[x,y,z], polygon, frontRot (0 sur,1 este,2 norte,3 oeste | null), frontDirection, roadAccess, occupiedBy (id de edificio | null)`. `open:true` = región no cerrada por calles (terreno abierto). Útil en Godot para spawn de props, zonas, navegación de peatones, etc. Las parcelas ≤3×3 celdas son un diseño propio, no una medida del juego de referencia.
+
+`roads.json` segmentos incluyen además `curve`: polilínea (x,y,z) con las esquinas de la rejilla redondeadas (arcos de radio ≤ 8 m); la malla del GLB sigue esa curva. `polyline` conserva los puntos de la rejilla.
+
 ## 7. buildings.json
 
-Por edificio: `id, catalogId, name, buildingType, category, sector, cell[x,y], rot (0..3), position[x,y,z], rotationYDegrees, scale, dimensions{width,depth,height}, footprint{widthCells,depthCells,cells,polygon}, model, materials[], connectedToRoad, meta{}`.
+Por edificio: `id, catalogId, level, variant, name, buildingType, category, sector, cell[x,y], rot (0..3), position[x,y,z], rotationYDegrees, scale, dimensions{width,depth,height}, footprint{widthCells,depthCells,cells,polygon}, model, materials[], connectedToRoad, meta{}`.
 - `position` = centro de la huella a la altura mínima del terreno bajo la huella. El modelo GLB está centrado en su huella (origen = centro, base a y=0) y trae 3 m de cimentación bajo el suelo para esconder pendientes.
 - `rotationYDegrees` = giro alrededor de +Y con la regla de la mano derecha. En Godot: `node.rotation_degrees.y = rotationYDegrees`.
 - **Frente del edificio**: el lado **+Z local** del modelo. Con `rot` 0/1/2/3 mira a sur/este/norte/oeste (+Z, +X, −Z, −X).

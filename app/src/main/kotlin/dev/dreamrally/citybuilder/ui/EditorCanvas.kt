@@ -136,13 +136,18 @@ private fun DrawScope.drawScene(vm: AppModel, cam: Camera) {
     val edges = city.edgesIn(x0, y0, x1, y1)
     fun vp(v: Vtx) = cam.project(v.x.toFloat(), v.y.toFloat(), if (relief) hAt(v.x, v.y) else 0f)
     val wScale = cam.zoom * 0.36f / 8f
-    for (e in edges) drawLine(Color(0xFFC9C5BA), vp(e.a), vp(e.b), strokeWidth = (e.type.width.toFloat() * wScale * 1.35f).coerceAtLeast(4f), cap = StrokeCap.Round) // acera/cordón
-    for (e in edges) drawLine(colorOf(e.type.rgb), vp(e.a), vp(e.b), strokeWidth = (e.type.width.toFloat() * wScale).coerceAtLeast(2f), cap = StrokeCap.Round)
-    if (cam.zoom > 30f) for (e in edges) {
-        if (e.type == RoadType.DIRT) continue
-        drawLine(if (e.type == RoadType.AVENUE) Color(0xFFE8C53A) else Color.White.copy(alpha = 0.8f), vp(e.a), vp(e.b), strokeWidth = (cam.zoom * 0.02f).coerceAtLeast(1f))
-        if (e.oneWay != 0) { val m = Offset((vp(e.a).x + vp(e.b).x) / 2, (vp(e.a).y + vp(e.b).y) / 2); drawCircle(Color(0xFF4FC3F7), cam.zoom * 0.05f, m) }
+    val segs = vm.graph()?.segments?.filter { sg -> sg.nodes.any { it.x in x0..x1 && it.y in y0..y1 } } ?: emptyList()
+    fun curvePath(sg: RoadSegment): androidx.compose.ui.graphics.Path {
+        val pts = Curves.fillet(sg.nodes.map { doubleArrayOf(it.x * Grid.CELL_M, it.y * Grid.CELL_M) })
+        return androidx.compose.ui.graphics.Path().apply {
+            pts.forEachIndexed { i, q -> val o = cam.project((q[0] / Grid.CELL_M).toFloat(), (q[1] / Grid.CELL_M).toFloat(), if (relief) hAt(Math.round(q[0] / Grid.CELL_M).toInt(), Math.round(q[1] / Grid.CELL_M).toInt()) else 0f); if (i == 0) moveTo(o.x, o.y) else lineTo(o.x, o.y) }
+        }
     }
+    val paths = segs.map { it to curvePath(it) }
+    for ((sg, pa) in paths) drawPath(pa, Color(0xFFC9C5BA), style = Stroke(width = (sg.type.width.toFloat() * wScale * 1.35f).coerceAtLeast(4f), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)) // acera/cordón
+    for ((sg, pa) in paths) drawPath(pa, colorOf(sg.type.rgb), style = Stroke(width = (sg.type.width.toFloat() * wScale).coerceAtLeast(2f), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+    if (cam.zoom > 30f) for ((sg, pa) in paths) if (sg.type != RoadType.DIRT)
+        drawPath(pa, if (sg.type == RoadType.AVENUE) Color(0xFFE8C53A) else Color.White.copy(alpha = 0.8f), style = Stroke(width = (cam.zoom * 0.02f).coerceAtLeast(1f), pathEffect = if (sg.type == RoadType.STREET) androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(cam.zoom * 0.25f, cam.zoom * 0.2f)) else null))
     for (n in city.nodesWithDegreeAtLeast(3, x0, y0, x1, y1)) drawCircle(Color(0xFF55585C), cam.zoom * 0.2f, vp(n))
     val selE = vm.selectedEdgeObj()
     if (selE != null) for (e in city.chainFrom(selE)) drawLine(Color(0xFFFFEB3B), vp(e.a), vp(e.b), strokeWidth = (e.type.width.toFloat() * wScale * 0.5f).coerceAtLeast(3f), cap = StrokeCap.Round)
@@ -153,6 +158,18 @@ private fun DrawScope.drawScene(vm: AppModel, cam: Camera) {
     if (prev.size >= 2) for ((p, q) in City.expandPath(prev)) {
         val ok = city.canBuildEdge(p, q).ok
         drawLine(if (ok) Color(0xFF4FC3F7).copy(alpha = 0.85f) else Color(0xFFEF5350).copy(alpha = 0.85f), vp(p), vp(q), strokeWidth = (vm.roadType.width.toFloat() * wScale).coerceAtLeast(3f), cap = StrokeCap.Round)
+    }
+
+    // ---- parcelas libres (se muestran al construir, como zonas edificables) ----
+    if ((vm.tool == Tool.BUILD || vm.moving) && cam.zoom >= 24f) {
+        val cx = Math.floor(cam.cx.toDouble()).toInt(); val cy = Math.floor(cam.cy.toDouble()).toInt()
+        val rect = intArrayOf(maxOf(x0, cx - 40), maxOf(y0, cy - 40), minOf(x1, cx + 40), minOf(y1, cy + 40))
+        vm.parcels(rect)?.parcels?.forEach { pc ->
+            val fr = pc.frontRot
+            if (pc.occupiedBy != null || fr == null) return@forEach
+            drawFootprint(cam, pc.x, pc.y, pc.w, pc.d, Color(0x2266BB6A), Color(0x8866BB6A))
+            drawFrontMarker(cam, pc.x, pc.y, pc.w, pc.d, fr, Color(0xAAFFFFFF))
+        }
     }
 
     // ---- edificios (orden por profundidad) ----

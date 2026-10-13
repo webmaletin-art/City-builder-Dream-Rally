@@ -18,7 +18,7 @@ object PackageImporter {
         val t = city["terrain"]!!.jsonObject
         val buildings = b["buildings"]!!.jsonArray.map {
             val o = it.jsonObject; val cell = o["cell"]!!.jsonArray
-            PlacedBuilding(o["id"]!!.jsonPrimitive.content, o["catalogId"]!!.jsonPrimitive.content, cell[0].jsonPrimitive.int, cell[1].jsonPrimitive.int, o["rot"]!!.jsonPrimitive.int)
+            PlacedBuilding(o["id"]!!.jsonPrimitive.content, o["catalogId"]!!.jsonPrimitive.content, cell[0].jsonPrimitive.int, cell[1].jsonPrimitive.int, o["rot"]!!.jsonPrimitive.int, o["level"]?.jsonPrimitive?.int ?: 0, o["variant"]?.jsonPrimitive?.int ?: 0)
         }
         val edges = ArrayList<RoadEdge>()
         for (s in roads["segments"]!!.jsonArray) {

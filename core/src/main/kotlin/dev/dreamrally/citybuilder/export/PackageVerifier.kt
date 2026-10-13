@@ -173,6 +173,21 @@ object PackageVerifier {
             }
         } catch (e: Exception) { err("roads.json malformado: ${e.message}") }
 
+        // manzanas y parcelas (opcional en paquetes 1.0.x)
+        json("blocks.json".takeIf { it in files } ?: "city.json")?.takeIf { "blocks.json" in files }?.let { bl ->
+            try {
+                val blockIds = bl["blocks"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content }.toSet()
+                val parcelIds = HashSet<String>()
+                for (p in bl["parcels"]!!.jsonArray) {
+                    val o = p.jsonObject; val id = o["id"]!!.jsonPrimitive.content
+                    if (!parcelIds.add(id)) err("Parcela duplicada: $id")
+                    if (o["block"]!!.jsonPrimitive.content !in blockIds) err("Parcela $id: manzana inexistente")
+                    val occ = o["occupiedBy"]; if (occ != null && occ !is JsonNull && occ.jsonPrimitive.content !in buildingIds) err("Parcela $id: edificio inexistente ${occ.jsonPrimitive.content}")
+                }
+                for (b in bl["blocks"]!!.jsonArray) b.jsonObject["parcels"]!!.jsonArray.forEach { if (it.jsonPrimitive.content !in parcelIds) err("Manzana ${b.jsonObject["id"]}: parcela inexistente ${it.jsonPrimitive.content}") }
+            } catch (e: Exception) { err("blocks.json malformado: ${e.message}") }
+        }
+
         return VerifyReport(errors, warnings, files.size)
     }
 }

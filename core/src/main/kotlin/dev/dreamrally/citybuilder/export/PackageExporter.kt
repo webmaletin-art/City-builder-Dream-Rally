@@ -40,18 +40,27 @@ object PackageExporter {
         val errors = ArrayList<String>(); val warnings = ArrayList<String>()
         val cfg = input.config
         if (cfg.unlocked.isEmpty()) errors += "El terreno no tiene sectores desbloqueados"
-        val allEdges = ArrayList<RoadEdge>(); var nb = 0
+        val allEdges = ArrayList<RoadEdge>(); var nb = 0; val checkedGlb = HashSet<String>()
         for (s in cfg.unlocked) {
             val d = input.readSector(s) ?: continue
             for (b in d.buildings) {
                 nb++
                 val spec = input.catalog[b.catalogId]
                 if (spec == null) { errors += "Edificio ${b.id}: '${b.catalogId}' no existe en el catálogo"; continue }
-                if (spec.model.kind == "glb") {
-                    val bytes = spec.model.glbPath?.let { input.readAsset(it) }
-                    if (bytes == null) errors += "Modelo GLB ausente para '${spec.id}': ${spec.model.glbPath}"
-                    else try { val js = GlbWriter.readJson(bytes); js["images"]?.jsonArray?.forEach { im -> if (im.jsonObject["uri"]?.jsonPrimitive?.content?.startsWith("data:") == false) errors += "'${spec.id}': el GLB usa texturas externas; debe embeberlas" } }
-                    catch (e: Exception) { errors += "GLB inválido para '${spec.id}': ${e.message}" }
+                val (rl, rv) = spec.resolve(b.level, b.variant)
+                val mdl = spec.modelFor(rl, rv)
+                if (mdl.kind == "glb" && checkedGlb.add(spec.appearanceKey(rl, rv))) {
+                    val bytes = mdl.glbPath?.let { input.readAsset(it) }
+                    if (bytes == null) errors += "Modelo GLB ausente para '${spec.id}': ${mdl.glbPath}"
+                    else try {
+                        val js = GlbWriter.readJson(bytes)
+                        js["images"]?.jsonArray?.forEach { im -> if (im.jsonObject["uri"]?.jsonPrimitive?.content?.startsWith("data:") == false) errors += "'${spec.id}': el GLB usa texturas externas; debe embeberlas" }
+                        GlbWriter.bounds(js)?.let { bb ->
+                            val fw = spec.widthCells * Grid.CELL_M; val fd = spec.depthCells * Grid.CELL_M
+                            if (bb[3] - bb[0] > fw * 1.25 || bb[5] - bb[2] > fd * 1.25) warnings += "'${spec.id}': el modelo GLB (${"%.1f".format(bb[3] - bb[0])}×${"%.1f".format(bb[5] - bb[2])} m) excede su huella (${fw}×${fd} m)"
+                            if (kotlin.math.abs((bb[0] + bb[3]) / 2) > fw * 0.3 || kotlin.math.abs((bb[2] + bb[5]) / 2) > fd * 0.3) warnings += "'${spec.id}': el modelo GLB no está centrado en su huella (origen esperado: centro, base a y=0)"
+                        }
+                    } catch (e: Exception) { errors += "GLB inválido para '${spec.id}': ${e.message}" }
                 }
             }
             allEdges += d.edges
@@ -91,22 +100,24 @@ object PackageExporter {
             val graph = RoadGraph(allEdges)
             val materials = LinkedHashMap<String, Mat>()
 
-            // ---- modelos de catálogo (una vez por tipo, instanciados desde buildings.json) ----
-            val usedIds = sectorData.values.flatMap { it.buildings }.map { it.catalogId }.distinct().sorted()
+            // ---- modelos de catálogo: uno por (tipo, nivel, variante) efectivo, instanciado desde buildings.json ----
+            data class UsedModel(val spec: BuildingSpec, val level: Int, val variant: Int) { val key get() = spec.appearanceKey(level, variant) }
+            val usedModels = sectorData.values.flatMap { it.buildings }.map { b -> val sp = input.catalog[b.catalogId]!!; val (l, v) = sp.resolve(b.level, b.variant); UsedModel(sp, l, v) }.distinctBy { it.key }.sortedBy { it.key }
+            val usedIds = usedModels.map { it.spec.id }.distinct()
             val modelMaterials = HashMap<String, List<String>>()
-            usedIds.forEachIndexed { i, id ->
-                check(); progress(Progress("Generando modelos 3D (${i + 1}/${usedIds.size})", 0.1f + 0.3f * i / usedIds.size.coerceAtLeast(1)))
-                val spec = input.catalog[id]!!
-                if (spec.model.kind == "glb") {
-                    val bytes = input.readAsset(spec.model.glbPath!!)!!
-                    emit("geometry/models/$id.glb", bytes)
+            usedModels.forEachIndexed { i, um ->
+                check(); progress(Progress("Generando modelos 3D (${i + 1}/${usedModels.size})", 0.1f + 0.3f * i / usedModels.size.coerceAtLeast(1)))
+                val mdl = um.spec.modelFor(um.level, um.variant)
+                if (mdl.kind == "glb") {
+                    val bytes = input.readAsset(mdl.glbPath!!)!!
+                    emit("geometry/models/${um.key}.glb", bytes)
                     val js = GlbWriter.readJson(bytes)
-                    modelMaterials[id] = js["materials"]?.jsonArray?.map { it.jsonObject["name"]?.jsonPrimitive?.content ?: "unnamed" } ?: emptyList()
+                    modelMaterials[um.key] = js["materials"]?.jsonArray?.map { it.jsonObject["name"]?.jsonPrimitive?.content ?: "unnamed" } ?: emptyList()
                 } else {
-                    val mesh = ModelFactory.build(spec)
+                    val mesh = ModelFactory.build(um.spec, mdl)
                     mesh.prims.values.forEach { materials[it.mat.name] = it.mat }
-                    modelMaterials[id] = mesh.prims.values.filter { it.idx.n > 0 }.map { it.mat.name }
-                    emit("geometry/models/$id.glb", GlbWriter.write(listOf(GlbNode(id, mesh)), "../../textures/"))
+                    modelMaterials[um.key] = mesh.prims.values.filter { it.idx.n > 0 }.map { it.mat.name }
+                    emit("geometry/models/${um.key}.glb", GlbWriter.write(listOf(GlbNode(um.key, mesh)), "../../textures/"))
                 }
             }
 
@@ -132,7 +143,7 @@ object PackageExporter {
                 }
                 for (n in nodeBySector[s] ?: emptyList()) {
                     val inc = graph.edgesAt(n.v)
-                    val needsPatch = n.kind != NodeKind.THROUGH || !straight(n.v, inc)
+                    val needsPatch = n.kind != NodeKind.THROUGH || inc.map { it.type to it.group }.distinct().size > 1
                     if (!needsPatch) continue
                     val t = inc.maxByOrNull { it.type.width }!!.type
                     val m = RoadMesher.nodePatch(n.v, inc.maxOf { it.type.width } / 2, t, hf); m.prims.values.forEach { materials[it.mat.name] = it.mat }
@@ -192,14 +203,16 @@ object PackageExporter {
                     put("id", b.id); put("catalogId", b.catalogId); put("name", spec.name); put("buildingType", spec.buildingType); put("category", spec.category.name.lowercase())
                     put("sector", s.name); put("cell", ints(b.x, b.y)); put("rot", b.rot)
                     put("position", arr(cx, baseY, cz)); put("rotationYDegrees", b.rot * 90); put("scale", arr(1.0, 1.0, 1.0))
-                    putJsonObject("dimensions") { put("width", spec.widthCells * Grid.CELL_M); put("depth", spec.depthCells * Grid.CELL_M); put("height", spec.model.heightM); put("unit", "meters") }
+                    putJsonObject("dimensions") { put("width", spec.widthCells * Grid.CELL_M); put("depth", spec.depthCells * Grid.CELL_M); put("height", spec.modelFor(b.level, b.variant).heightM); put("unit", "meters") }
                     putJsonObject("footprint") {
                         put("widthCells", fw); put("depthCells", fd)
                         putJsonArray("cells") { for (c in City.footprintCells(b.x, b.y, fw, fd)) add(ints(c.first, c.second)) }
                         putJsonArray("polygon") { for ((px, pz) in listOf(b.x to b.y, b.x + fw to b.y, b.x + fw to b.y + fd, b.x to b.y + fd)) add(arr(px * Grid.CELL_M, pz * Grid.CELL_M)) }
                     }
-                    put("model", "geometry/models/${spec.id}.glb")
-                    put("materials", JsonArray((modelMaterials[spec.id] ?: emptyList()).map { JsonPrimitive(it) }))
+                    val (rl, rv) = spec.resolve(b.level, b.variant); val mkey = spec.appearanceKey(rl, rv)
+                    put("level", rl); put("variant", rv)
+                    put("model", "geometry/models/$mkey.glb")
+                    put("materials", JsonArray((modelMaterials[mkey] ?: emptyList()).map { JsonPrimitive(it) }))
                     put("connectedToRoad", connected)
                     put("meta", JsonObject(spec.meta.mapValues { JsonPrimitive(it.value) }))
                 }
@@ -208,6 +221,30 @@ object PackageExporter {
                 put("schemaVersion", Format.SCHEMA_VERSION); put("units", "meters")
                 put("rotationConvention", "rotationYDegrees: giro alrededor de +Y (regla de la mano derecha, sentido antihorario visto desde arriba), aplicado al modelo centrado en su huella; position es el centro de la huella a la altura base del terreno")
                 put("buildings", JsonArray(buildingsJson))
+            }))
+
+            // ---- blocks.json: manzanas y parcelas derivadas de la red vial real ----
+            check(); progress(Progress("Manzanas y parcelas", 0.88f))
+            val edgeKeys = HashSet<String>().also { h -> allEdges.forEach { h += it.key } }
+            val occ = HashMap<Long, String>()
+            for (d in sectorData.values) for (bd in d.buildings) { val sp = input.catalog[bd.catalogId]!!; for ((cx, cy) in City.footprintCells(bd.x, bd.y, sp.footprintW(bd.rot), sp.footprintD(bd.rot))) occ[(cx.toLong() shl 32) xor (cy.toLong() and 0xFFFFFFFFL)] = bd.id }
+            val rect = intArrayOf(sectorIds.minOf { it.x } * Grid.SECTOR_CELLS, sectorIds.minOf { it.y } * Grid.SECTOR_CELLS, (sectorIds.maxOf { it.x } + 1) * Grid.SECTOR_CELLS - 1, (sectorIds.maxOf { it.y } + 1) * Grid.SECTOR_CELLS - 1)
+            val blockMap = BlockBuilder.build(rect, { a, c -> RoadEdge.key(a, c) in edgeKeys }, { x, y -> Grid.sectorKey(x, y) in cfg.unlocked },
+                { x, y -> cfg.roundabouts.any { x in it.cx - 2..it.cx + 1 && y in it.cy - 2..it.cy + 1 } }, { x, y -> occ[(x.toLong() shl 32) xor (y.toLong() and 0xFFFFFFFFL)] })
+            val dirNames = listOf("south", "east", "north", "west")
+            emit("blocks.json", prettyJson.encodeToString(JsonObject.serializer(), buildJsonObject {
+                put("schemaVersion", Format.SCHEMA_VERSION); put("units", "meters")
+                put("note", "Derivadas de roads.json: manzana = región de celdas rodeada por calles; parcela = lote ≤3×3 celdas. frontRot: 0 sur, 1 este, 2 norte, 3 oeste (lado de la calle).")
+                put("blocks", JsonArray(blockMap.blocks.map { bl -> buildJsonObject {
+                    put("id", bl.id); put("cellCount", bl.cellCount); put("open", bl.open); put("boundsCells", ints(*bl.bounds)); put("parcels", JsonArray(bl.parcels.map { JsonPrimitive(it.id) })) } }))
+                put("parcels", JsonArray(blockMap.parcels.map { pc ->
+                    buildJsonObject {
+                        put("id", pc.id); put("block", pc.blockId); put("cell", ints(pc.x, pc.y)); put("size", ints(pc.w, pc.d)); put("sector", Grid.sectorKey(pc.x, pc.y).name)
+                        put("position", arr((pc.x + pc.w / 2.0) * Grid.CELL_M, hf.footprintBase(pc.x, pc.y, pc.w, pc.d), (pc.y + pc.d / 2.0) * Grid.CELL_M))
+                        putJsonArray("polygon") { for ((px, pz) in listOf(pc.x to pc.y, pc.x + pc.w to pc.y, pc.x + pc.w to pc.y + pc.d, pc.x to pc.y + pc.d)) add(arr(px * Grid.CELL_M, pz * Grid.CELL_M)) }
+                        if (pc.frontRot != null) { put("frontRot", pc.frontRot); put("frontDirection", dirNames[pc.frontRot]) } else { put("frontRot", JsonNull); put("frontDirection", JsonNull) }
+                        put("roadAccess", pc.frontRot != null); put("occupiedBy", pc.occupiedBy?.let { JsonPrimitive(it) } ?: JsonNull)
+                    } }))
             }))
 
             // ---- roads.json ----
@@ -244,7 +281,7 @@ object PackageExporter {
                 put("schemaVersion", Format.SCHEMA_VERSION); put("result", "ok")
                 put("sectors", sectorIds.size); put("buildings", buildingsJson.size); put("catalogModels", usedIds.size)
                 put("roadSegments", graph.segments.size); put("roadNodes", graph.nodes.size); put("intersections", graph.intersections.size)
-                put("roadComponents", graph.components); put("buildingsWithoutRoad", withoutRoad)
+                put("roadComponents", graph.components); put("blocks", blockMap.blocks.size); put("parcels", blockMap.parcels.size); put("buildingsWithoutRoad", withoutRoad)
                 put("textures", texNames.size); put("materials", materials.size)
                 put("warnings", JsonArray(warnings.map { JsonPrimitive(it) }))
             }
@@ -259,7 +296,7 @@ object PackageExporter {
                 putJsonObject("dimensions") { put("sectors", sectorIds.size); put("widthMeters", (maxX - minX + 1) * Grid.SECTOR_M); put("depthMeters", (maxY - minY + 1) * Grid.SECTOR_M) }
                 putJsonObject("units") { put("length", "meters"); put("angle", "degrees"); put("scale", 1.0) }
                 putJsonObject("coordinateSystem") { put("handedness", "right"); put("up", "+Y"); put("east", "+X"); put("south", "+Z"); put("origin", "sector sec_0_0 north-west corner (cell 0,0)"); put("gltfCompatible", true) }
-                putJsonObject("entryPoints") { put("city", "city.json"); put("roads", "roads.json"); put("buildings", "buildings.json"); put("materials", "materials/materials.json") }
+                putJsonObject("entryPoints") { put("city", "city.json"); put("roads", "roads.json"); put("buildings", "buildings.json"); put("blocks", "blocks.json"); put("materials", "materials/materials.json") }
                 putJsonObject("compatibility") {
                     put("gltf", "2.0 (GLB, texturas PNG externas por URI relativa)"); put("godotMinimum", "4.2"); put("minReaderSchemaVersion", 1)
                     put("importerNote", "Requiere un importador propio en Dream Rally; el ZIP no se importa automáticamente.")
@@ -321,6 +358,7 @@ object PackageExporter {
                 put("startNode", s.start.id); put("endNode", s.end.id)
                 put("nodeIds", JsonArray(s.nodes.map { JsonPrimitive(it.id) })); put("edgeIds", JsonArray(s.edgeIds.map { JsonPrimitive(it) }))
                 put("polyline", JsonArray(pts.map { arr(it[0], it[1], it[2]) }))
+                put("curve", JsonArray(RoadMesher.curve(s, hf).map { arr(it[0], it[1], it[2]) }))
                 put("lengthMeters", r2(len)); put("widthMeters", s.type.width); put("lanes", s.type.lanes)
                 put("oneWay", s.oneWay); put("loop", s.isLoop)
                 putJsonObject("elevation") { put("mode", "terrain_following"); put("bridge", false); put("tunnel", false); put("liftMeters", Format.ROAD_LIFT) }

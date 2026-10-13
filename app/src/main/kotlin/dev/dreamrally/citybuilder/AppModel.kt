@@ -100,6 +100,16 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var animTick by mutableIntStateOf(0)
     fun startPop(id: String?) { if (id != null) { popAnim[id] = System.currentTimeMillis(); animTick++ } }
 
+    // ---- caches derivados (se recalculan al cambiar la ciudad) ----
+    private var graphRev = -1L; private var graphCache: RoadGraph? = null
+    fun graph(): RoadGraph? { val c = city ?: return null; if (graphRev != c.revision || graphCache == null) { graphCache = RoadGraph(c.edges()); graphRev = c.revision }; return graphCache }
+    private var parcelKey = ""; private var parcelCache: BlockMap? = null
+    fun parcels(rect: IntArray): BlockMap? {
+        val c = city ?: return null; val key = "${c.revision}:${rect.joinToString(",")}"
+        if (key != parcelKey) { parcelCache = c.blocks(rect); parcelKey = key }
+        return parcelCache
+    }
+
     fun resetEditor() { tool = Tool.HAND; ghost = null; roadPreview = emptyList(); selectedBuilding = null; selectedEdge = null; moving = false; replacing = false; toast = null }
     fun recenter() { cam.cx = 0f; cam.cy = 0f; camTick++ }
     fun bump() { revision++ }
@@ -127,10 +137,15 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         val id = if (moving) c.building(selectedBuilding ?: "")?.catalogId else selectedCatalogId
         val spec = id?.let { catalog[it] } ?: run { ghostValid = false; ghostMessage = "Elegí un edificio del catálogo"; return }
         val ignore = if (moving) selectedBuilding else null
-        if (autoRotate) rot = c.bestRotation(spec, cell.first, cell.second, rot)
-        val chk = c.canPlace(spec, cell.first, cell.second, rot, ignore)
+        var at = cell
+        if (autoRotate) {   // ajuste a la calle: salta a la posición válida más cercana con el frente sobre una carretera
+            val al = if (ignore == null) c.alignToRoad(spec, cell.first, cell.second, rot) else null
+            if (al != null) { at = al.x to al.y; rot = al.rot } else rot = c.bestRotation(spec, cell.first, cell.second, rot)
+        }
+        ghost = at
+        val chk = c.canPlace(spec, at.first, at.second, rot, ignore)
         ghostValid = chk.ok; ghostMessage = if (chk.ok) chk.warnings.firstOrNull() else chk.message
-        info = "Celda ${cell.first}, ${cell.second}  •  altura ${"%.1f".format(Heights.at(c.config.relief, c.config.reliefSeed, cell.first, cell.second))} m"
+        info = "Celda ${at.first}, ${at.second}  •  altura ${"%.1f".format(Heights.at(c.config.relief, c.config.reliefSeed, at.first, at.second))} m"
     }
 
     fun confirmGhost() {

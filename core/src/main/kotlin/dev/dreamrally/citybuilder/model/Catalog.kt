@@ -30,8 +30,15 @@ data class ModelSpec(
 @Serializable
 data class PlacementRules(
     val needsRoad: Boolean = false,       // si true, la edición avisa (no bloquea) cuando no toca una carretera
-    val maxSlopeM: Double = 6.0
+    val maxSlopeM: Double = 6.0,
+    val frontOnRoad: Boolean = false,     // el frente debe mirar a una calle (aviso, o bloqueo si strict)
+    val strict: Boolean = false,          // true: incumplir needsRoad/frontOnRoad impide colocar
+    val allowedRotations: List<Int> = listOf(0, 1, 2, 3)
 )
+
+/** Aspecto visual por nivel de evolución y variante. La lógica (huella, reglas) no depende del aspecto. */
+@Serializable
+data class Appearance(val level: Int = 0, val variant: Int = 0, val model: ModelSpec, val name: String? = null)
 
 @Serializable
 data class BuildingSpec(
@@ -44,8 +51,23 @@ data class BuildingSpec(
     val placement: PlacementRules = PlacementRules(),
     val buildingType: String,
     val origin: String = "footprint_center_base", // origen del modelo: centro de la huella, a nivel del suelo
-    val meta: Map<String, String> = emptyMap()
+    val meta: Map<String, String> = emptyMap(),
+    val appearances: List<Appearance> = emptyList(),   // niveles/variantes; vacío = solo [model]
+    val display: Map<String, String> = emptyMap()      // parámetros de visualización (iconos, escala en UI…)
 ) {
+    /** Modelo para (nivel, variante): coincidencia exacta; si no, mismo nivel variante 0; si no, el modelo base. */
+    fun modelFor(level: Int, variant: Int): ModelSpec =
+        appearances.firstOrNull { it.level == level && it.variant == variant }?.model
+            ?: appearances.firstOrNull { it.level == level && it.variant == 0 }?.model ?: model
+    /** Aspecto efectivo (nivel, variante) que se usará realmente. */
+    fun resolve(level: Int, variant: Int): Pair<Int, Int> = when {
+        appearances.any { it.level == level && it.variant == variant } -> level to variant
+        appearances.any { it.level == level && it.variant == 0 } -> level to 0
+        else -> 0 to 0
+    }
+    fun hasLevel(level: Int) = level == 0 || appearances.any { it.level == level }
+    fun appearanceKey(level: Int, variant: Int): String = if (level == 0 && variant == 0) id else "${id}__l${level}_v$variant"
+
     fun footprintW(rot: Int) = if (rot % 2 == 0) widthCells else depthCells
     fun footprintD(rot: Int) = if (rot % 2 == 0) depthCells else widthCells
 }
@@ -59,6 +81,10 @@ class Catalog(specs: Collection<BuildingSpec>) {
     operator fun get(id: String): BuildingSpec? = map[id]
     fun byCategory(c: Category) = map.values.filter { it.category == c }
     fun plus(extra: Collection<BuildingSpec>) = Catalog(map.values + extra)
+
+    /** Sustituye el modelo visual de una entrada conservando toda su lógica (huella, reglas, categoría). */
+    fun withModel(id: String, model: ModelSpec, appearances: List<Appearance>? = null): Catalog =
+        Catalog(map.values.map { if (it.id == id) it.copy(model = model, appearances = appearances ?: it.appearances) else it })
 
     fun toJson(): String = JSON.encodeToString(CatalogFile(buildings = all))
 
@@ -74,6 +100,9 @@ object DefaultCatalog {
         id: String, name: String, cat: Category, w: Int, d: Int, type: String, shape: String, h: Double,
         wall: Int, roof: Int, facade: String, needsRoad: Boolean = true, meta: Map<String, String> = emptyMap()
     ) = BuildingSpec(id, name, cat, w, d, ModelSpec("procedural", shape, h, wall, roof, facade), PlacementRules(needsRoad), type, meta = meta)
+
+    private fun lv(spec: BuildingSpec, hMul: Double, wall: Int, roof: Int): BuildingSpec =
+        spec.copy(appearances = listOf(Appearance(1, 0, spec.model.copy(heightM = spec.model.heightM * hMul, wallRgb = wall, roofRgb = roof), "Nivel 2")))
 
     val catalog: Catalog by lazy {
         Catalog(listOf(
@@ -131,6 +160,9 @@ object DefaultCatalog {
             b("rd_busstop", "Parada de autobús", Category.ROAD_INFRA, 1, 1, "bus_stop", "box", 3.0, 0x3B7EA1, 0x2E5E78, "none", needsRoad = false),
             b("rd_toll", "Peaje", Category.ROAD_INFRA, 2, 1, "toll", "box", 5.0, 0xE0E0E0, 0xC83B2E, "none", needsRoad = false),
             b("rd_parking", "Estacionamiento", Category.ROAD_INFRA, 2, 2, "parking", "plaza", 0.1, 0x4A4D52, 0x4A4D52, "none", needsRoad = false)
-        ))
+        ).map { when (it.id) {
+            "res_house_small" -> lv(it, 1.4, 0xF7EBD3, 0x7A2E22); "res_house_medium" -> lv(it, 1.35, 0xEFE0C4, 0x5C2A22)
+            "com_shop" -> lv(it, 1.5, 0xFFD98A, 0x7E2A24); "ind_factory" -> lv(it, 1.3, 0xCFCBC0, 0x555555)
+            else -> it } }.map { if (it.category == Category.RESIDENTIAL || it.category == Category.COMMERCIAL || it.category == Category.PUBLIC || it.category == Category.OFFICE) it.copy(placement = it.placement.copy(frontOnRoad = it.placement.needsRoad)) else it })
     }
 }

@@ -214,7 +214,7 @@ private fun SelectionPanel(vm: AppModel) {
         if (b != null) {
             val spec = c.catalog[b.catalogId]
             Text("${spec?.name ?: b.catalogId}  •  ${spec?.category?.label}", fontWeight = FontWeight.Bold)
-            Text("id ${b.id} • celda ${b.x},${b.y} • giro ${b.rot * 90}° • ${spec?.widthCells}×${spec?.depthCells} celdas • ${spec?.model?.heightM} m • sector ${b.sector.name}", fontSize = 11.sp)
+            Text("nivel ${b.level + 1} • id ${b.id} • celda ${b.x},${b.y} • giro ${b.rot * 90}° • ${spec?.widthCells}×${spec?.depthCells} celdas • ${spec?.model?.heightM} m • sector ${b.sector.name}", fontSize = 11.sp)
             if (vm.moving) Text("Arrastrá a la nueva posición y confirmá con ✓ (mover es gratis).", fontSize = 12.sp)
             else Text("Tip: arrastrá el edificio seleccionado para moverlo.", fontSize = 11.sp)
             Row(Modifier.horizontalScrollCompat(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -224,6 +224,7 @@ private fun SelectionPanel(vm: AppModel) {
                 else {
                     OutlinedButton(onClick = { val r = c.rotateBuilding(b.id); vm.toast = if (r.ok) "Girado" else r.message; vm.bump() }) { Text("⟳ Girar") }
                     OutlinedButton(onClick = { vm.moving = true; vm.autoRotate = false; vm.rot = b.rot; vm.updateGhost(b.x to b.y) }) { Text("Mover") }
+                    if (spec?.hasLevel(b.level + 1) == true) Button(onClick = { val r = c.upgradeBuilding(b.id); vm.toast = r.message; if (r.ok) vm.startPop(b.id); vm.bump() }) { Text("⬆ Mejorar") }
                     OutlinedButton(onClick = { vm.replacing = true; spec?.let { vm.category = it.category } }) { Text("Reemplazar") }
                     OutlinedButton(onClick = { c.removeBuilding(b.id); vm.selectedBuilding = null; vm.bump() }) { Text("Eliminar") }
                 }

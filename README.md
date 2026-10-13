@@ -22,6 +22,9 @@ Si el APK debug de una build se instala sobre otra, se actualiza sin desinstalar
 - Botón **EXPORTAR CIUDAD PARA DREAM RALLY**: valida → genera GLB/texturas/JSON → ZIP → verifica → guardar en el teléfono. Con progreso y cancelación, en segundo plano.
 - "Ciudad de ejemplo" lista para exportar.
 
+## Motor de construcción
+Calles como grafo con curvas, **manzanas y parcelas derivadas de la red vial**, ajuste a la calle, reglas de colocación por datos, niveles/variantes visuales y reemplazo de modelos sin tocar la lógica: ver [`docs/design/building-engine-spec.md`](docs/design/building-engine-spec.md). REA + JADX se ejecutaron sobre nuestra propia APK; **la APK de SimCity no se analizó** (ver `docs/research/urban-builder-analysis.md` §7).
+
 ## Estructura
 ```
 core/   Kotlin JVM puro: modelo, red vial, catálogo, guardado, GLB, exportador/verificador/importador, pruebas
@@ -49,7 +52,7 @@ Poné `catalog.json` (formato de `metadata/catalog.json` de un paquete exportado
 ## Estado de verificación (honesto)
 | Cosa | Estado |
 |---|---|
-| Pruebas del núcleo (`:core:test`, 26) y de cámara (`:app:testDebugUnitTest`, 3) | Ejecutadas y pasan localmente |
+| Pruebas del núcleo (`:core:test`, 37) y de cámara (`:app:testDebugUnitTest`, 3) | Ejecutadas y pasan localmente |
 | Compilación APK debug/release | Compila localmente |
 | Los 53 GLB del ejemplo | Cargan en un lector independiente (trimesh) |
 | UI en dispositivo/emulador | **No probada** (sin emulador en el entorno de desarrollo). Esperá fallos de usabilidad en la primera prueba |

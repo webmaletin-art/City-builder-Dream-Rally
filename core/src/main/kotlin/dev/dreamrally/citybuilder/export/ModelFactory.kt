@@ -22,9 +22,8 @@ object ModelFactory {
     fun flatRoofMat(spec: ModelSpec) = Mat("flatroof_${hex(spec.roofRgb)}", spec.roofRgb, "concrete")
     private fun plain(rgb: Int, prefix: String) = Mat("${prefix}_${hex(rgb)}", rgb, null, roughness = 0.95)
 
-    fun build(spec: BuildingSpec): MeshBuilder {
+    fun build(spec: BuildingSpec, m: ModelSpec = spec.model): MeshBuilder {
         val mb = MeshBuilder()
-        val m = spec.model
         val w = spec.widthCells * Grid.CELL_M; val dp = spec.depthCells * Grid.CELL_M
         val hw = w / 2 - MARGIN; val hd = dp / 2 - MARGIN
         when (m.shape) {
@@ -34,7 +33,7 @@ object ModelFactory {
             "pine" -> pine(mb, m)
             "palm" -> palm(mb, m)
             "bush" -> sphere(mb, plain(m.roofRgb, "foliage"), 0.0, 0.7, 0.0, 1.2, 0.8, 1.2, 8, 5)
-            "park" -> park(mb, spec, w / 2, dp / 2)
+            "park" -> park(mb, spec, m, w / 2, dp / 2)
             "plaza" -> slab(mb, Mat("pavers_${hex(m.wallRgb)}", m.wallRgb, "pavers"), w / 2 - 0.2, dp / 2 - 0.2, m.heightM.coerceAtLeast(0.1), tex = true)
             "fountain" -> fountain(mb, m, w / 2, dp / 2)
             "lamp" -> lamp(mb, m)
@@ -161,8 +160,7 @@ object ModelFactory {
         walls(mb, mat, -hw, -hd, hw, hd, y0, h); top(mb, mat, -hw, -hd, hw, hd, h, if (tex) 8.0 else 100.0)
     }
 
-    private fun park(mb: MeshBuilder, spec: BuildingSpec, hw: Double, hd: Double) {
-        val m = spec.model
+    private fun park(mb: MeshBuilder, spec: BuildingSpec, m: ModelSpec, hw: Double, hd: Double) {
         slab(mb, Mat("grass_park", m.wallRgb, null, roughness = 1.0), hw - 0.2, hd - 0.2, 0.3)
         // camino de adoquín en cruz
         top(mb, Mat("pavers_C9C2B4", 0xC9C2B4, "pavers"), -1.0, -hd + 0.4, 1.0, hd - 0.4, 0.34)

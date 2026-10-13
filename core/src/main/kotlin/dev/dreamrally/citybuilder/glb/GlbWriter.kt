@@ -109,6 +109,18 @@ object GlbWriter {
         return bb.array()
     }
 
+    /** Caja envolvente (minx,miny,minz,maxx,maxy,maxz) de todos los accesores POSITION; null si no hay datos. */
+    fun bounds(js: JsonObject): DoubleArray? {
+        val acc = js["accessors"]?.jsonArray ?: return null
+        val out = doubleArrayOf(1e30, 1e30, 1e30, -1e30, -1e30, -1e30); var any = false
+        for (m in js["meshes"]?.jsonArray ?: return null) for (pr in m.jsonObject["primitives"]!!.jsonArray) {
+            val a = acc[pr.jsonObject["attributes"]!!.jsonObject["POSITION"]!!.jsonPrimitive.int].jsonObject
+            val mn = a["min"]?.jsonArray ?: continue; val mx = a["max"]?.jsonArray ?: continue
+            for (k in 0..2) { out[k] = minOf(out[k], mn[k].jsonPrimitive.double); out[k + 3] = maxOf(out[k + 3], mx[k].jsonPrimitive.double) }; any = true
+        }
+        return if (any) out else null
+    }
+
     /** Lee el chunk JSON de un GLB (para verificar texturas/materiales referenciados). Lanza si es inválido. */
     fun readJson(glb: ByteArray): JsonObject {
         require(glb.size >= 20) { "GLB demasiado corto" }

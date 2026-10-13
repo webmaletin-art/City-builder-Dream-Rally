@@ -9,7 +9,7 @@ import kotlin.math.sin
 
 object Format {
     const val PACKAGE_NAME = "DreamCityPackage"
-    const val PACKAGE_VERSION = "1.0.0"
+    const val PACKAGE_VERSION = "1.1.0"
     const val SCHEMA_VERSION = 1
     const val ROAD_LIFT = 0.06
     const val VERTS = Grid.SECTOR_CELLS + 1
@@ -21,6 +21,13 @@ object Format {
 class HeightField(val config: CityConfig) {
     fun at(vx: Int, vy: Int) = Heights.at(config.relief, config.reliefSeed, vx, vy)
     fun at(v: Vtx) = at(v.x, v.y)
+    /** Altura bilineal en coordenadas del mundo (metros), coherente con los vértices del terreno. */
+    fun atWorld(x: Double, z: Double): Double {
+        val gx = x / Grid.CELL_M; val gy = z / Grid.CELL_M
+        val i = Math.floor(gx).toInt(); val j = Math.floor(gy).toInt(); val tx = gx - i; val ty = gy - j
+        val a = at(i, j); val b = at(i + 1, j); val c = at(i, j + 1); val d = at(i + 1, j + 1)
+        return (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty
+    }
     fun footprintBase(x: Int, y: Int, w: Int, d: Int): Double {
         var m = Double.MAX_VALUE
         for (i in x..x + w) for (j in y..y + d) m = minOf(m, at(i, j))
@@ -57,19 +64,27 @@ object RoadMesher {
     private fun patchRgb(t: RoadType) = when (t) { RoadType.DIRT -> 0x9A7248; RoadType.STREET -> 0x606064; RoadType.AVENUE -> 0x55585C; RoadType.HIGHWAY -> 0x4A4D52 }
     fun patchMat(t: RoadType) = Mat("roadpatch_${t.name.lowercase()}", patchRgb(t), null, roughness = 0.95)
 
+    /** Puntos (x,y,z) de la curva del segmento: esquinas de la rejilla redondeadas con arcos y alturas del terreno. */
+    fun curve(seg: RoadSegment, hf: HeightField): List<DoubleArray> {
+        val xz = Curves.fillet(seg.nodes.map { Format.world(it) })
+        return xz.map { doubleArrayOf(it[0], hf.atWorld(it[0], it[1]) + Format.ROAD_LIFT, it[1]) }
+    }
+
     fun segmentMesh(seg: RoadSegment, hf: HeightField): MeshBuilder {
         val mb = MeshBuilder(); val mat = roadMat(seg.type); val half = seg.type.width / 2
+        val pts = curve(seg, hf)
+        // dirección por vértice = bisectriz de las aristas vecinas, para que la banda siga la curva sin huecos
+        fun dir(i: Int): DoubleArray {
+            val a = pts[maxOf(0, i - 1)]; val b = pts[minOf(pts.size - 1, i + 1)]
+            val dx = b[0] - a[0]; val dz = b[2] - a[2]; val l = hypot(dx, dz).coerceAtLeast(1e-9)
+            return doubleArrayOf(dx / l, dz / l)
+        }
         var vAcc = 0.0
-        for (i in 0 until seg.nodes.size - 1) {
-            val p = seg.nodes[i]; val q = seg.nodes[i + 1]
-            val pw = Format.world(p); val qw = Format.world(q)
-            val py = hf.at(p) + Format.ROAD_LIFT; val qy = hf.at(q) + Format.ROAD_LIFT
-            val dx = qw[0] - pw[0]; val dz = qw[1] - pw[1]; val len = hypot(dx, dz)
-            val px = -dz / len * half; val pz = dx / len * half
-            val v0 = vAcc / 8.0; vAcc += len; val v1 = vAcc / 8.0
-            mb.quad(mat, arrayOf(
-                doubleArrayOf(pw[0] - px, py, pw[1] - pz), doubleArrayOf(pw[0] + px, py, pw[1] + pz),
-                doubleArrayOf(qw[0] + px, qy, qw[1] + pz), doubleArrayOf(qw[0] - px, qy, qw[1] - pz)),
+        for (i in 0 until pts.size - 1) {
+            val p = pts[i]; val q = pts[i + 1]; val dp = dir(i); val dq = dir(i + 1)
+            val len = hypot(q[0] - p[0], q[2] - p[2]); val v0 = vAcc / 8.0; vAcc += len; val v1 = vAcc / 8.0
+            val ax = -dp[1] * half; val az = dp[0] * half; val bx = -dq[1] * half; val bz = dq[0] * half
+            mb.quad(mat, arrayOf(doubleArrayOf(p[0] - ax, p[1], p[2] - az), doubleArrayOf(p[0] + ax, p[1], p[2] + az), doubleArrayOf(q[0] + bx, q[1], q[2] + bz), doubleArrayOf(q[0] - bx, q[1], q[2] - bz)),
                 arrayOf(doubleArrayOf(0.0, v0), doubleArrayOf(1.0, v0), doubleArrayOf(1.0, v1), doubleArrayOf(0.0, v1)), doubleArrayOf(0.0, 1.0, 0.0))
         }
         return mb
