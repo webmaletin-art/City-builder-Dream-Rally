@@ -13,6 +13,7 @@ Si el APK debug de una build se instala sobre otra, se actualiza sin desinstalar
 
 ## Qué hace
 - Crear ciudad eligiendo **bioma** (templado, desierto, nieve, tropical, otoño) y **relieve** (llano, ondulado, colinas).
+- **Experiencia tipo constructor móvil**: arrastrar el edificio con contorno blanco/rojo y burbuja ✓ ⟳ ✕, **auto-giro hacia la calle**, animación al construir, sombras, aceras e intersecciones, arrastrar el edificio seleccionado para moverlo.
 - Isométrico táctil: mover (1 dedo, herramienta ✋), zoom/desplazar (2 dedos), girar vista (⟲ ⟳), cuadrícula.
 - **Catálogo** de 45 edificios propios en 10 categorías: colocar (con vista previa válida/inválida), girar, mover, reemplazar, eliminar.
 - **Carreteras** arrastrando el dedo: tierra, calle, avenida, autopista, un sentido, **rotondas**; intersecciones y conexiones automáticas; cambiar tipo/eliminar tramos.

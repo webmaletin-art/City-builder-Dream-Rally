@@ -88,6 +88,7 @@ Las velocidades y clases son valores por tipo de vía definidos por la app (no d
 Por edificio: `id, catalogId, name, buildingType, category, sector, cell[x,y], rot (0..3), position[x,y,z], rotationYDegrees, scale, dimensions{width,depth,height}, footprint{widthCells,depthCells,cells,polygon}, model, materials[], connectedToRoad, meta{}`.
 - `position` = centro de la huella a la altura mínima del terreno bajo la huella. El modelo GLB está centrado en su huella (origen = centro, base a y=0) y trae 3 m de cimentación bajo el suelo para esconder pendientes.
 - `rotationYDegrees` = giro alrededor de +Y con la regla de la mano derecha. En Godot: `node.rotation_degrees.y = rotationYDegrees`.
+- **Frente del edificio**: el lado **+Z local** del modelo. Con `rot` 0/1/2/3 mira a sur/este/norte/oeste (+Z, +X, −Z, −X).
 - `dimensions` es la huella sin girar; `footprint` ya viene girada.
 
 ## 8. materials/materials.json y texturas
