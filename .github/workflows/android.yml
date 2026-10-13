@@ -60,18 +60,19 @@ jobs:
         run: |
           set -e
           mkdir -p dist
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
           cp app/build/outputs/apk/debug/app-debug.apk dist/CityBuilder-debug.apk
           test -s dist/CityBuilder-debug.apk
           test -s dist/demo-city.dreamcity.zip
           if [ "$HAS_RELEASE_KEY" = "true" ]; then
             cp app/build/outputs/apk/release/app-release.apk dist/CityBuilder-release.apk
             test -s dist/CityBuilder-release.apk
-            "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs dist/CityBuilder-release.apk | head -3
+            "$APKSIGNER" verify --print-certs dist/CityBuilder-release.apk | head -3
             SIGNED="firmado con la clave de distribución (verificado con apksigner)"
           else
             SIGNED="NO generado: faltan los secretos RELEASE_KEYSTORE_* (ver README)"
           fi
-          "$ANDROID_HOME"/build-tools/*/apksigner verify dist/CityBuilder-debug.apk
+          "$APKSIGNER" verify --print-certs dist/CityBuilder-debug.apk | head -2
           {
             echo "## Resultado"
             echo "| Archivo | Tamaño |"; echo "|---|---|"
